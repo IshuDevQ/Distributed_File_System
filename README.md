@@ -461,18 +461,6 @@ This prevents corrupted or incomplete data from being returned to the user.
 
 ---
 
-## Resume Description
-
-**Distributed File Storage System with Replication and Metadata Service**
-
-- Built a distributed file storage backend using FastAPI, SQLite, and Docker Compose with support for file upload, download, chunking, and metadata tracking.
-- Implemented chunk-level replication across multiple storage nodes using a configurable replication factor and round-robin placement strategy.
-- Designed a metadata service to track file hashes, chunk hashes, replica locations, and storage-node mappings.
-- Added file integrity verification using SHA-256 hashes during upload, storage, and download reconstruction.
-- Implemented node health checks and automatic re-replication to restore missing replicas after simulated node failures.
-- Containerized the application using Docker Compose with persistent storage volumes for node data and metadata.
-
----
 
 ## Future Improvements
 
