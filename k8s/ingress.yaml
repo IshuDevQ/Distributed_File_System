@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dfs-api-ingress
+  namespace: distributed-file-system
+spec:
+  rules:
+    - host: dfs.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dfs-api-service
+                port:
+                  number: 8000
