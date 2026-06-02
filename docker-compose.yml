@@ -1,0 +1,10 @@
+services:
+  distributed-storage-api:
+    build: .
+    container_name: distributed-storage-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage_nodes:/app/storage_nodes
+      - ./downloads:/app/downloads
+      - ./metadata.db:/app/metadata.db
