@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dfs-redis
+  namespace: distributed-file-system
+  labels:
+    app: dfs-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dfs-redis
+  template:
+    metadata:
+      labels:
+        app: dfs-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dfs-redis-service
+  namespace: distributed-file-system
+spec:
+  type: ClusterIP
+  selector:
+    app: dfs-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

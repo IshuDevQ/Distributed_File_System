@@ -4,3 +4,5 @@ sqlalchemy
 python-multipart
 pydantic
 aiofiles
+redis
+celery

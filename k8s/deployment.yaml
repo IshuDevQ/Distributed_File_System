@@ -30,10 +30,8 @@ spec:
           volumeMounts:
             - name: storage-volume
               mountPath: /app/storage_nodes
-
             - name: downloads-volume
               mountPath: /app/downloads
-
             - name: db-volume
               mountPath: /app/db
 
@@ -43,8 +41,6 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
 
           livenessProbe:
             httpGet:
@@ -52,26 +48,66 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
-            timeoutSeconds: 3
-            failureThreshold: 3
-
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
 
       volumes:
         - name: storage-volume
           persistentVolumeClaim:
             claimName: dfs-storage-pvc
-
         - name: downloads-volume
           persistentVolumeClaim:
             claimName: dfs-downloads-pvc
+        - name: db-volume
+          persistentVolumeClaim:
+            claimName: dfs-db-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dfs-repair-worker
+  namespace: distributed-file-system
+  labels:
+    app: dfs-repair-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dfs-repair-worker
+  template:
+    metadata:
+      labels:
+        app: dfs-repair-worker
+    spec:
+      containers:
+        - name: dfs-repair-worker
+          image: ishudevq/distributed-file-system-worker:latest
+          imagePullPolicy: IfNotPresent
 
+          command:
+            - celery
+            - "-A"
+            - app.workers.celery_app.celery_app
+            - worker
+            - "--loglevel=info"
+
+          envFrom:
+            - configMapRef:
+                name: dfs-config
+
+          volumeMounts:
+            - name: storage-volume
+              mountPath: /app/storage_nodes
+            - name: downloads-volume
+              mountPath: /app/downloads
+            - name: db-volume
+              mountPath: /app/db
+
+      volumes:
+        - name: storage-volume
+          persistentVolumeClaim:
+            claimName: dfs-storage-pvc
+        - name: downloads-volume
+          persistentVolumeClaim:
+            claimName: dfs-downloads-pvc
         - name: db-volume
           persistentVolumeClaim:
             claimName: dfs-db-pvc

@@ -1,10 +1,65 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: dfs-redis
+    ports:
+      - "6379:6379"
+
   distributed-storage-api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: distributed-storage-api
     ports:
       - "8000:8000"
+    environment:
+      DATABASE_PATH: /app/db/metadata.db
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+
+      ENABLE_REDIS_CACHE: "true"
+      ENABLE_ASYNC_REPAIR: "true"
+      ENABLE_AUDIT_LOG: "true"
+
+      CACHE_TTL_SECONDS: 300
+      CHUNK_SIZE: 1048576
+      REPLICATION_FACTOR: 2
+      REPLICATION_STRATEGY: round_robin
+      CANARY_PERCENTAGE: 10
     volumes:
       - ./storage_nodes:/app/storage_nodes
       - ./downloads:/app/downloads
-      - ./metadata.db:/app/metadata.db
+      - ./db:/app/db
+    depends_on:
+      - redis
+
+  repair-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: dfs-repair-worker
+    environment:
+      DATABASE_PATH: /app/db/metadata.db
+
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_URL: redis://redis:6379/0
+
+      ENABLE_REDIS_CACHE: "true"
+      ENABLE_ASYNC_REPAIR: "true"
+      ENABLE_AUDIT_LOG: "true"
+
+      CACHE_TTL_SECONDS: 300
+      CHUNK_SIZE: 1048576
+      REPLICATION_FACTOR: 2
+      REPLICATION_STRATEGY: round_robin
+      CANARY_PERCENTAGE: 10
+    volumes:
+      - ./storage_nodes:/app/storage_nodes
+      - ./downloads:/app/downloads
+      - ./db:/app/db
+    depends_on:
+      - redis
+      - distributed-storage-api

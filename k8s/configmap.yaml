@@ -6,6 +6,20 @@ metadata:
 data:
   CHUNK_SIZE: "1048576"
   REPLICATION_FACTOR: "2"
+
   STORAGE_BASE_DIR: "/app/storage_nodes"
   DOWNLOAD_DIR: "/app/downloads"
   DATABASE_PATH: "/app/db/metadata.db"
+
+  REDIS_HOST: "dfs-redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_URL: "redis://dfs-redis-service:6379/0"
+
+  ENABLE_REDIS_CACHE: "true"
+  ENABLE_ASYNC_REPAIR: "true"
+  ENABLE_AUDIT_LOG: "true"
+
+  CACHE_TTL_SECONDS: "300"
+  REPLICATION_STRATEGY: "round_robin"
+  CANARY_PERCENTAGE: "10"

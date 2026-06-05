@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from pathlib import Path
 
 from app.database import get_db
-from app.models import FileMetadata, ChunkMetadata
+from app.models import FileMetadata, ChunkMetadata, ChunkReplica
 from app.schemas import FileResponse
 from app.services.chunker import chunk_bytes
 from app.services.replication import replicate_chunk
@@ -15,9 +15,44 @@ from app.services.metadata import (
 )
 from app.services.storage import read_chunk
 from app.utils.hashing import sha256_bytes
-from app.config import DOWNLOAD_DIR
+from app.config import DOWNLOAD_DIR, CHUNK_SIZE
+from app.cache.redis_cache import (
+    cache,
+    file_metadata_key,
+    file_list_key,
+    invalidate_file_cache,
+)
+from app.events.audit import emit_audit_event
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+
+def file_to_dict(file_metadata: FileMetadata) -> dict:
+    return {
+        "id": file_metadata.id,
+        "filename": file_metadata.filename,
+        "content_type": file_metadata.content_type,
+        "size_bytes": file_metadata.size_bytes,
+        "file_hash": file_metadata.file_hash,
+        "total_chunks": file_metadata.total_chunks,
+        "created_at": str(file_metadata.created_at),
+        "chunks": [
+            {
+                "id": chunk.id,
+                "chunk_index": chunk.chunk_index,
+                "chunk_hash": chunk.chunk_hash,
+                "size_bytes": chunk.size_bytes,
+                "replicas": [
+                    {
+                        "node_name": replica.node_name,
+                        "path": replica.path
+                    }
+                    for replica in chunk.replicas
+                ]
+            }
+            for chunk in file_metadata.chunks
+        ]
+    }
 
 
 @router.post("/upload", response_model=FileResponse)
@@ -28,7 +63,7 @@ async def upload_file(
     file_data = await uploaded_file.read()
 
     file_hash = sha256_bytes(file_data)
-    total_chunks = (len(file_data) + 1024 * 1024 - 1) // (1024 * 1024)
+    total_chunks = (len(file_data) + CHUNK_SIZE - 1) // CHUNK_SIZE
 
     file_metadata = create_file_metadata(
         db=db,
@@ -64,12 +99,48 @@ async def upload_file(
                 path=path
             )
 
+            emit_audit_event(
+                db=db,
+                event_type="chunk.replicated",
+                entity_type="chunk",
+                entity_id=str(chunk_metadata.id),
+                message=f"Chunk replicated to {node_name}",
+                payload={
+                    "file_id": file_metadata.id,
+                    "chunk_id": chunk_metadata.id,
+                    "chunk_index": chunk_index,
+                    "node_name": node_name,
+                    "path": path
+                }
+            )
+
+    invalidate_file_cache(file_metadata.id)
+
+    emit_audit_event(
+        db=db,
+        event_type="file.uploaded",
+        entity_type="file",
+        entity_id=str(file_metadata.id),
+        message=f"File uploaded: {uploaded_file.filename}",
+        payload={
+            "file_id": file_metadata.id,
+            "filename": uploaded_file.filename,
+            "size_bytes": len(file_data),
+            "total_chunks": total_chunks
+        }
+    )
+
     return get_file_by_id(file_metadata.id, db)
 
 
 @router.get("", response_model=list[FileResponse])
 def list_files(db: Session = Depends(get_db)):
-    return (
+    cached = cache.get_json(file_list_key())
+
+    if cached is not None:
+        return cached
+
+    files = (
         db.query(FileMetadata)
         .options(
             joinedload(FileMetadata.chunks)
@@ -78,9 +149,20 @@ def list_files(db: Session = Depends(get_db)):
         .all()
     )
 
+    response = [file_to_dict(file_metadata) for file_metadata in files]
+
+    cache.set_json(file_list_key(), response)
+
+    return response
+
 
 @router.get("/{file_id}", response_model=FileResponse)
 def get_file_by_id(file_id: int, db: Session = Depends(get_db)):
+    cached = cache.get_json(file_metadata_key(file_id))
+
+    if cached is not None:
+        return cached
+
     file_metadata = (
         db.query(FileMetadata)
         .options(
@@ -94,7 +176,55 @@ def get_file_by_id(file_id: int, db: Session = Depends(get_db)):
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
-    return file_metadata
+    response = file_to_dict(file_metadata)
+    cache.set_json(file_metadata_key(file_id), response)
+
+    return response
+
+
+@router.delete("/{file_id}")
+def delete_file(file_id: int, db: Session = Depends(get_db)):
+    file_metadata = (
+        db.query(FileMetadata)
+        .options(
+            joinedload(FileMetadata.chunks)
+            .joinedload(ChunkMetadata.replicas)
+        )
+        .filter(FileMetadata.id == file_id)
+        .first()
+    )
+
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    for chunk in file_metadata.chunks:
+        for replica in chunk.replicas:
+            path = Path(replica.path)
+
+            if path.exists():
+                path.unlink()
+
+    db.delete(file_metadata)
+    db.commit()
+
+    invalidate_file_cache(file_id)
+
+    emit_audit_event(
+        db=db,
+        event_type="file.deleted",
+        entity_type="file",
+        entity_id=str(file_id),
+        message=f"File deleted: {file_metadata.filename}",
+        payload={
+            "file_id": file_id,
+            "filename": file_metadata.filename
+        }
+    )
+
+    return {
+        "message": "File deleted successfully",
+        "file_id": file_id
+    }
 
 
 @router.get("/{file_id}/download")
